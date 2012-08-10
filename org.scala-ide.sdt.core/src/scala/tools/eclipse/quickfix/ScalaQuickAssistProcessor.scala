@@ -50,6 +50,7 @@ class ScalaQuickAssistProcessor extends org.eclipse.jdt.ui.text.java.IQuickAssis
   private def suggestAssist(compilationUnit: ICompilationUnit, problemMessage: String, location: Position): Seq[IJavaCompletionProposal] = {
     val refactoringSuggestions: Seq[IJavaCompletionProposal] = try {
       List(
+        ForComprehensionTransformProposal,
         ExtractLocalProposal,
         ExpandCaseClassBindingProposal,
         InlineLocalProposal,

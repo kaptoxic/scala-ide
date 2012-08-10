@@ -1074,6 +1074,19 @@
             </enablement>
          </action>
          <action
+               class="scala.tools.eclipse.refactoring.ForComprehensionTransformAction"
+               definitionId="scala.tools.eclipse.refactoring.command.ForComprehensionTransformBinding"
+               id="scala.tools.eclipse.refactoring.ForComprehensionTransformAction"
+               label="Transform Into for Comprehension Binding"
+               menubarPath="scala.tools.eclipse.refactoring.refactoringMenu/scala.tools.eclipse.refactoring.quickfixGroup"
+               tooltip="Transform Into for Comprehension Binding">
+            <enablement>
+               <objectClass
+                     name="org.eclipse.jface.text.TextSelection">
+               </objectClass>
+            </enablement>
+         </action>
+         <action
                class="scala.tools.eclipse.refactoring.ExpandCaseClassBindingAction"
                definitionId="scala.tools.eclipse.refactoring.command.ExpandCaseClassBinding"
                id="scala.tools.eclipse.refactoring.expandCaseClassBindingAction"
@@ -1182,6 +1195,11 @@
          description="Open an editor on the selected implicit conversion"
          id="scala.tools.eclipse.editor.OpenImplicit"
          name="Open Implicit">
+      </command>
+      <command
+            categoryId="scala.tools.eclipse.refactoring.commands.refactoring"
+            id="scala.tools.eclipse.refactoring.command.ForComprehensionTransformBinding"
+            name="For Comprehension Transform Binding">
       </command>
 </extension>
 
