@@ -20,11 +20,11 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
   import global._
   import global.definitions._
   
-  case class PreparationResult(appNode:Tree, valueDef: String, generatorString: String, yieldBodyString: String)  
+  case class PreparationResult(appNode:Tree, generatorString: String, yieldBodyString: String)  
   
   class RefactoringParameters
   
-  val forComprehensionString = "for (%s <- %s) yield %s"
+  val forComprehensionString = "for (%s) yield %s"
     
   trait ForComprehensionInfo
     
@@ -122,6 +122,8 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
           	treeString(body) + "}"
         	eclipseLog.info("string: " + string)
         case None =>
+          eclipseLog.info("extract failed: ")
+          typeTreeTraverser.traverse(applyNode)
       }
     }
     
@@ -154,7 +156,7 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
 
         eclipseLog.info("generatorString: " + generatorChars.mkString)
         
-        Right(PreparationResult(applyNode, paramName, generatorChars.mkString, yieldBodyChars.mkString))
+        Right(PreparationResult(applyNode, paramName + """ <- """ + generatorChars.mkString, yieldBodyChars.mkString))
       } else failure
     }
         
@@ -165,13 +167,13 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
   
   def perform(selection: Selection, preparationResult: PreparationResult, params: RefactoringParameters): Either[RefactoringError, List[Change]] = {
 
-    val PreparationResult(appNode, valueDef, generator, yieldBody)   = preparationResult
+    val PreparationResult(appNode, generator, yieldBody)   = preparationResult
             
-    eclipseLog.info("replace with: " + forComprehensionString.format(valueDef, generator, yieldBody))  
+    eclipseLog.info("replace with: " + forComprehensionString.format(generator, yieldBody))  
         
     val replacement = {
       PlainText.Indented(
-        forComprehensionString.format(valueDef, generator, yieldBody)
+        forComprehensionString.format(generator, yieldBody)
   		)
             
 //      appNode
@@ -188,4 +190,79 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
   
   def index: IndexLookup = sys.error("")
   
+  
+  // helpers
+  def determineType(tree: Tree): String = {
+      tree match {
+        case DefDef(mods, name, tparams, vparamss, tpt, rhs) =>
+          ("tree: " + "DefDef")
+        case TypeDef(mods, name, tparams, rhs) =>
+          ("tree: " + "TypeDef")
+
+        case LabelDef(name, params, rhs) =>
+          ("tree: " + "LabelDef")
+
+        case imp @ Import(expr, selectors) =>
+          ("tree: " + "@ Import")
+
+        case Block(stats, expr) =>
+          ("tree: " + "Block")
+        case CaseDef(pat, guard, body) =>
+          ("tree: " + "CaseDef")
+        case Alternative(trees) =>
+          ("tree: " + "Alternative")
+        case Star(elem) =>
+          ("tree: " + "Star")
+        case Bind(name, body) =>
+          ("tree: " + "Bind")
+        case UnApply(fun, args) =>
+          ("tree: " + "UnApply")
+        case ArrayValue(elemtpt, trees) =>
+          ("tree: " + "ArrayValue")
+        case Function(vparams, body) =>
+          ("tree: " + "Function")
+        case Assign(lhs, rhs) =>
+          ("tree: " + "Assign")
+        case If(cond, thenp, elsep) =>
+          ("tree: " + "If")
+        case Match(selector, cases) =>
+          ("tree: " + "Match")
+        case Return(expr) =>
+          ("tree: " + "Return")
+        case Try(block, catches, finalizer) =>
+          ("tree: " + "Try")
+        case Throw(expr) =>
+          ("tree: " + "Throw")
+        case New(tpt) =>
+          ("tree: " + "New")
+        case Typed(expr, tpt) =>
+          ("tree: " + "Typed")
+        case TypeApply(fun, args) =>
+          ("tree: " + "TypeApply")
+        case Apply(fun, args) =>
+          ("tree: " + "Apply")
+        case ApplyDynamic(qual, args) =>
+          ("tree: " + "ApplyDynamic")
+        case Select(qualifier, selector) =>
+          ("tree: " + "Select")
+        case SingletonTypeTree(ref) =>
+          ("tree: " + "SingletonTypeTree")
+        case SelectFromTypeTree(qualifier, selector) =>
+          ("tree: " + "SelectFromTypeTree")
+        case CompoundTypeTree(templ) =>
+          ("tree: " + "CompoundTypeTree")
+        case AppliedTypeTree(tpt, args) =>
+          ("tree: " + "AppliedTypeTree")
+        case TypeBoundsTree(lo, hi) =>
+          ("tree: " + "TypeBoundsTree")
+        case ExistentialTypeTree(tpt, whereClauses) =>
+          ("tree: " + "ExistentialTypeTree")
+        case SelectFromArray(qualifier, selector, erasure) =>
+          ("tree: " + "SelectFromArray")
+
+        case _ => ("no type?!")
+      }
+    }
+  
+  def typeTreeTraverser = new ForeachTreeTraverser(determineType)
 }
