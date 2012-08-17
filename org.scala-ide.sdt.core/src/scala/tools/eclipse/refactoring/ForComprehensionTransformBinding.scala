@@ -6,6 +6,11 @@ import transformation.TreeFactory
 import scala.tools.refactoring.analysis.GlobalIndexes
 import scala.tools.eclipse.logging.HasLogger
 import scala.tools.refactoring.common.PimpedTrees
+import sourcegen.SourceGenerator
+import common.{SilentTracing, ConsoleTracing, Change}
+import tools.nsc.symtab.Flags
+import tools.nsc.ast.parser.Tokens
+import scala.tools.nsc.ast.Trees
 
 // TODO why do I need GlobalIndexes?
 abstract class ForComprehensionTransformBinding extends MultiStageRefactoring with GlobalIndexes with HasLogger with PimpedTrees {
@@ -13,115 +18,111 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
   this: common.CompilerAccess =>
   
   import global._
+  import global.definitions._
   
   case class PreparationResult(appNode:Tree, valueDef: String, generatorString: String, yieldBodyString: String)  
   
   class RefactoringParameters
   
   val forComprehensionString = "for (%s <- %s) yield %s"
+    
+  trait ForComprehensionInfo
+    
+  case class GeneratorInfo(variable: Tree, generator: Tree) extends ForComprehensionInfo
   
   def prepare(s: Selection): Either[PreparationError, PreparationResult] = {
     eclipseLog.info("ForComprehensionTransformBinding prepare called.")
     
     // prepare failure response
     def failure = Left(PreparationError("No appropriate for comprehension transformable expressions found."))
-
-    def determineType(tree: Tree) {
-      tree match {
-        case DefDef(mods, name, tparams, vparamss, tpt, rhs) =>
-          eclipseLog.info("tree: " + "DefDef")
-        case TypeDef(mods, name, tparams, rhs) =>
-          eclipseLog.info("tree: " + "TypeDef")
-
-        case LabelDef(name, params, rhs) =>
-          eclipseLog.info("tree: " + "LabelDef")
-
-        case imp @ Import(expr, selectors) =>
-          eclipseLog.info("tree: " + "@ Import")
-
-        case Block(stats, expr) =>
-          eclipseLog.info("tree: " + "Block")
-        case CaseDef(pat, guard, body) =>
-          eclipseLog.info("tree: " + "CaseDef")
-        case Alternative(trees) =>
-          eclipseLog.info("tree: " + "Alternative")
-        case Star(elem) =>
-          eclipseLog.info("tree: " + "Star")
-        case Bind(name, body) =>
-          eclipseLog.info("tree: " + "Bind")
-        case UnApply(fun, args) =>
-          eclipseLog.info("tree: " + "UnApply")
-        case ArrayValue(elemtpt, trees) =>
-          eclipseLog.info("tree: " + "ArrayValue")
-        case Function(vparams, body) =>
-          eclipseLog.info("tree: " + "Function")
-        case Assign(lhs, rhs) =>
-          eclipseLog.info("tree: " + "Assign")
-        case If(cond, thenp, elsep) =>
-          eclipseLog.info("tree: " + "If")
-        case Match(selector, cases) =>
-          eclipseLog.info("tree: " + "Match")
-        case Return(expr) =>
-          eclipseLog.info("tree: " + "Return")
-        case Try(block, catches, finalizer) =>
-          eclipseLog.info("tree: " + "Try")
-        case Throw(expr) =>
-          eclipseLog.info("tree: " + "Throw")
-        case New(tpt) =>
-          eclipseLog.info("tree: " + "New")
-        case Typed(expr, tpt) =>
-          eclipseLog.info("tree: " + "Typed")
-        case TypeApply(fun, args) =>
-          eclipseLog.info("tree: " + "TypeApply")
-        case Apply(fun, args) =>
-          eclipseLog.info("tree: " + "Apply")
-        case ApplyDynamic(qual, args) =>
-          eclipseLog.info("tree: " + "ApplyDynamic")
-        case Select(qualifier, selector) =>
-          eclipseLog.info("tree: " + "Select")
-        case SingletonTypeTree(ref) =>
-          eclipseLog.info("tree: " + "SingletonTypeTree")
-        case SelectFromTypeTree(qualifier, selector) =>
-          eclipseLog.info("tree: " + "SelectFromTypeTree")
-        case CompoundTypeTree(templ) =>
-          eclipseLog.info("tree: " + "CompoundTypeTree")
-        case AppliedTypeTree(tpt, args) =>
-          eclipseLog.info("tree: " + "AppliedTypeTree")
-        case TypeBoundsTree(lo, hi) =>
-          eclipseLog.info("tree: " + "TypeBoundsTree")
-        case ExistentialTypeTree(tpt, whereClauses) =>
-          eclipseLog.info("tree: " + "ExistentialTypeTree")
-        case SelectFromArray(qualifier, selector, erasure) =>
-          eclipseLog.info("tree: " + "SelectFromArray")
-
-        case _ => eclipseLog.info("no type?!")
-      }
-    }
-    def fullName(sym: Symbol) = "method " + sym.fullName + sym.tpe.paramTypes.map(x => x.typeSymbol.fullName).mkString(" ", ",", "")
-
-    def checkIfFunctionType(tpe: Type): Boolean = {
-      def getApplicationInfoMethodRec(methodType: Type): Boolean = methodType match {
-        case MethodType(params, resultType) => true
-        case t => false
-      }
-
-      def getApplicationInfoFunctionRec(functionType: Type): Boolean = functionType match {
-        case TypeRef(pre: Type, sym: Symbol, args: List[Type]) if (definitions.isFunctionType(functionType)) || (definitions.isFunctionType(pre)) =>
-          true
-        case t => false
-      }
-
-      val result = getApplicationInfoMethodRec(tpe) || getApplicationInfoFunctionRec(tpe)
-      result
+    
+    def isTransformable(tree: Tree): Boolean = tree match {
+      case Apply(fun, args) if isInnerMap(fun) => true
+      case Apply(fun, List(Function(vparams, body))) if isFlatMap(fun) => isTransformable(body)
+      case _ => false
     }
     
-    def isTransformable(functionNode: Tree) = functionNode.tpe match {
+    def extractIfTransformable(tree: Tree):
+    	Option[(List[GeneratorInfo], Tree)] = {
+      
+      def extractIfTranfsormableRec(treeToCheck: Tree, flatMaps: List[GeneratorInfo]):
+    	Option[(List[GeneratorInfo], Tree)] =      
+			  treeToCheck match {
+		      case Apply(fun, List(Function(List(vparam), body))) if isInnerMap(fun) =>
+		        val traverser = new FindTreeTraverser( (_:Tree).isInstanceOf[Select] )
+		        traverser.traverse(fun)
+		        traverser.result match {
+		          case Some(selectTree@Select(generator, _)) =>
+		          	Some( (flatMaps :+ GeneratorInfo(variable = vparam, generator = selectTree), generator) )
+		          case None => None
+		        }
+		      case Apply(fun, List(Function(List(vparam), body))) if isFlatMap(fun) =>
+		        val traverser = new FindTreeTraverser( (_:Tree).isInstanceOf[Select] )
+		        traverser.traverse(fun)
+		        traverser.result match {
+		          case Some(selectTree) =>
+		          	extractIfTranfsormableRec(body, flatMaps :+ GeneratorInfo(variable = vparam, generator = selectTree))
+		          case None => None
+		        }
+		      case _ => None
+		    }
+      
+      extractIfTranfsormableRec(tree, List.empty)
+    }
+    
+    // TODO check types
+    def isFlatMap(functionNode: Tree) = functionNode.tpe match {
+      case MethodType(params, resultType) if "flatMap" == functionNode.symbol.nameString && params.size == 1 =>
+        true
+      case tr@TypeRef(pre: Type, sym: Symbol, args: List[Type]) if (definitions.isFunctionType(tr)) 
+    	&& "flatMap" == functionNode.symbol.nameString && args.size == 1 =>
+       true
+      case _ => false
+    }
+    
+    def isInnerMap(functionNode: Tree) = functionNode.tpe match {
       case MethodType(params, resultType) if "map" == functionNode.symbol.nameString && params.size == 1 =>
         true
       case tr@TypeRef(pre: Type, sym: Symbol, args: List[Type]) if (definitions.isFunctionType(tr)) 
     	&& "map" == functionNode.symbol.nameString && args.size == 1 =>
        true
       case _ => false
+    }
+       
+    val sourceContent = s.root.pos.source.content
+    
+    def treeString(tree: Tree) = tree match {
+      case v:ValDef => v.nameString
+      case _ => 
+        val arrayToStoreChars = Array.ofDim[Char](tree.pos.end - tree.pos.start)
+        System.arraycopy(sourceContent, tree.pos.start, arrayToStoreChars, 0, tree.pos.end - tree.pos.start)
+        arrayToStoreChars.mkString
+    }
+    
+    def getSourceString(info: ForComprehensionInfo) = {          
+	    info match {  	      
+			  case GeneratorInfo(variable, generator) =>
+			    treeString(variable) + """<-""" + treeString(generator)  			     
+	    }
+  	}	
+    
+    
+    for (applyNode@Apply(fun, args) <- s.findSelectedOfType[Apply]) {
+      eclipseLog.info("isTransformable(applyNode)" + isTransformable(applyNode))
+    }    
+    
+    for (applyNode@Apply(fun, args) <- s.findSelectedOfType[Apply]) {
+      eclipseLog.info("extractIfTransformable(applyNode)" + extractIfTransformable(applyNode))
+    }
+    
+    for (applyNode@Apply(fun, args) <- s.findSelectedOfType[Apply]) {
+      extractIfTransformable(applyNode) match {
+        case (Some((listOfGenerators, body))) => 
+          val string = "for (" + listOfGenerators.map( info => getSourceString(info)).mkString(";") + ") yield {" +
+          	treeString(body) + "}"
+        	eclipseLog.info("string: " + string)
+        case None =>
+      }
     }
     
     // find Apply tree nodes
@@ -130,7 +131,7 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
       /* deal with map defined as method */
       
       // check if applied function term is suitable for transformation
-      if (isTransformable(fun)) {
+      if (isInnerMap(fun)) {
         // extract yield body
         val (paramName, body) = args.head match {
           case Function(List(vparam), body) =>
@@ -158,6 +159,8 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
     }
         
     res getOrElse failure
+    
+//    failure
   }
   
   def perform(selection: Selection, preparationResult: PreparationResult, params: RefactoringParameters): Either[RefactoringError, List[Change]] = {
@@ -167,17 +170,17 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
     eclipseLog.info("replace with: " + forComprehensionString.format(valueDef, generator, yieldBody))  
         
     val replacement = {
-//      PlainText.Indented(
-//        forComprehensionString.format(valueDef, generator, yieldBody)
-//  		)
+      PlainText.Indented(
+        forComprehensionString.format(valueDef, generator, yieldBody)
+  		)
             
-      appNode
-  		PlainText.Indented("""
-               |for (
-               |  i <- list
-               |) yield {
-               |  i * 2
-               |}""".stripMargin)
+//      appNode
+//  		PlainText.Indented("""
+//               |for (
+//               |  i <- list
+//               |) yield {
+//               |  i * 2
+//               |}""".stripMargin)
     } replaces appNode
     
     Right(refactor(List(replacement)))
