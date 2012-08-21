@@ -11,6 +11,8 @@ import common.{SilentTracing, ConsoleTracing, Change}
 import tools.nsc.symtab.Flags
 import tools.nsc.ast.parser.Tokens
 import scala.tools.nsc.ast.Trees
+import java.io.ByteArrayOutputStream
+import java.io.PrintWriter
 
 // TODO why do I need GlobalIndexes?
 abstract class ForComprehensionTransformBinding extends MultiStageRefactoring with GlobalIndexes with HasLogger with PimpedTrees {
@@ -54,7 +56,9 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
 		        traverser.result match {
 		          case Some(selectTree@Select(generator, _)) =>
 		          	Some( (flatMaps :+ GeneratorInfo(variable = vparam, generator = selectTree), generator) )
-		          case None => None
+		          case None =>
+		            eclipseLog.warn("case Apply isInnerMap - select not found")
+		            None
 		        }
 		      case Apply(fun, List(Function(List(vparam), body))) if isFlatMap(fun) =>
 		        val traverser = new FindTreeTraverser( (_:Tree).isInstanceOf[Select] )
@@ -62,9 +66,25 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
 		        traverser.result match {
 		          case Some(selectTree) =>
 		          	extractIfTranfsormableRec(body, flatMaps :+ GeneratorInfo(variable = vparam, generator = selectTree))
-		          case None => None
+		          case None => 
+		            eclipseLog.warn("case Apply isFlatMap - select not found")
+		            None
 		        }
-		      case _ => None
+		      case Apply(fun, args) =>
+            eclipseLog.warn("case _, fun.symbol.nameString = " + fun.symbol.nameString)
+            eclipseLog.warn("args.size = " + args.size)
+            eclipseLog.warn("traverse args.head: " + typeTreeTraverser(args.head))
+            eclipseLog.warn("isInnerMap(fun) = " + isInnerMap(fun))
+            args.head match {
+              case Function(params, body) =>
+              	eclipseLog.warn("args.head match Function, params.size" + params.size)
+              case w =>
+              	eclipseLog.warn("args.head doenst match Function, it matches: " + determineType(w))
+            }
+            None
+		      case _ => 
+            eclipseLog.warn("case _, determine type = " + determineType(treeToCheck))
+            None
 		    }
       
       extractIfTranfsormableRec(tree, List.empty)
@@ -108,6 +128,10 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
     
     
     for (applyNode@Apply(fun, args) <- s.findSelectedOfType[Apply]) {
+      eclipseLog.info("isFlatMap(applyNode)" + isFlatMap(applyNode))
+    }
+    
+    for (applyNode@Apply(fun, args) <- s.findSelectedOfType[Apply]) {
       eclipseLog.info("isTransformable(applyNode)" + isTransformable(applyNode))
     }    
     
@@ -123,7 +147,7 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
         	eclipseLog.info("string: " + string)
         case None =>
           eclipseLog.info("extract failed: ")
-          typeTreeTraverser.traverse(applyNode)
+          printTree(applyNode)
       }
     }
     
@@ -264,5 +288,12 @@ abstract class ForComprehensionTransformBinding extends MultiStageRefactoring wi
       }
     }
   
-  def typeTreeTraverser = new ForeachTreeTraverser(determineType)
+  def typeTreeTraverser = new ForeachTreeTraverser(x => eclipseLog.info(determineType(x)))
+  def printTree(tree: Tree) = {
+    val byteArrayOutputStream = new ByteArrayOutputStream
+    val pw = new PrintWriter(byteArrayOutputStream)
+    newTreePrinter(pw).print(tree)
+    pw.flush()
+    byteArrayOutputStream.toString
+  }
 }
